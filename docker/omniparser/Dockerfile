@@ -3,7 +3,7 @@
 # Provides UI element detection using YOLO + EasyOCR + Florence-2
 # Weights downloaded from HuggingFace on first startup
 
-FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
 
 LABEL maintainer="noVNC Automation"
 LABEL description="OmniParser v2 inference server (YOLO + OCR + Florence-2)"
@@ -33,7 +33,7 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
 RUN pip3 install --no-cache-dir \
     torch>=2.0.0 \
     torchvision>=0.15.0 \
-    --index-url https://download.pytorch.org/whl/cu124
+    --index-url https://download.pytorch.org/whl/cu128
 
 # Install ML dependencies (transformers pinned to match Florence-2 model config)
 RUN pip3 install --no-cache-dir \
