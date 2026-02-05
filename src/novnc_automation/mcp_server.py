@@ -594,9 +594,22 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             cdp_endpoint = None
             if _docker is None:
                 _docker = DockerOrchestrator()
+
+            # Wait for Docker browser to be healthy if container is starting
             docker_status = _docker.status()
+            if docker_status.browser_running and not docker_status.browser_healthy:
+                # Container exists but not healthy yet - wait up to 30s
+                for _ in range(15):
+                    await asyncio.sleep(2)
+                    docker_status = _docker.status()
+                    if docker_status.browser_healthy:
+                        break
+
             if docker_status.browser_healthy:
                 cdp_endpoint = "http://localhost:9222"
+            elif docker_status.browser_running:
+                # Container exists but failed to become healthy
+                return [TextContent(type="text", text="Docker browser container exists but is not healthy. Check 'docker logs automation-browser' for errors.")]
 
             _session_id = session_id
             _browser = AutomationBrowser(
