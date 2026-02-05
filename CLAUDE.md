@@ -85,7 +85,8 @@ docker/
 
 | Directory | Purpose | Git Status |
 |-----------|---------|------------|
-| `tmp/` | All ephemeral data (gitignored) | gitignored |
+| `tmp/` | Ephemeral data and model cache (gitignored) | gitignored |
+| `tmp/repos/` | OmniParser weights, GUI-Actor model | gitignored |
 | `tmp/screenshots/` | MCP screenshots | gitignored |
 | `tmp/x11_screenshots/` | X11-level click screenshots with coords | gitignored |
 | `tmp/omniparser/` | OmniParser annotated images and JSON | gitignored |
@@ -107,7 +108,7 @@ docker/
 - **omniparser**: OmniParser v2 inference (port 8010) - YOLO + EasyOCR for UI element detection
 - **gui-actor**: GUI-Actor inference (port 8001) - Qwen2.5-VL for natural language clicks
 
-ML services require NVIDIA GPU. Models are downloaded on first startup (~2-5GB).
+ML services require NVIDIA GPU. Models are cached in `tmp/repos/` (symlinked, shared across projects).
 
 ## Configuration
 

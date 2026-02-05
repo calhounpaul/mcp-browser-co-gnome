@@ -4,6 +4,12 @@ FastAPI server for UI element detection using YOLO + EasyOCR + Florence-2.
 Weights are downloaded from HuggingFace on first startup.
 """
 
+import os
+
+# GPU is assigned via docker-compose.yml device_ids: ['1']
+# Docker maps that GPU to appear as GPU 0 inside the container
+# Do NOT set CUDA_VISIBLE_DEVICES here - it would look for a non-existent GPU
+
 import io
 import json
 import time

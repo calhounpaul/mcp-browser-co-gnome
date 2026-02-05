@@ -6,7 +6,7 @@ services:
     container_name: automation-browser
     environment:
       - VNC_PASSWORD=${VNC_PASSWORD:-secret}
-      - RESOLUTION=${RESOLUTION:-1920x1080x24}
+      - RESOLUTION=${RESOLUTION:-1280x720x24}
       - DISPLAY=:99
       - INSTALL_UBLOCK=${INSTALL_UBLOCK:-true}
     ports:
@@ -32,7 +32,7 @@ services:
     environment:
       - DISPLAY_CONTAINER_NAME=automation-browser
       - FILE_NAME=recording.mp4
-      - VIDEO_SIZE=${VIDEO_SIZE:-1920x1080}
+      - VIDEO_SIZE=${VIDEO_SIZE:-1280x720}
       - FRAME_RATE=${FRAME_RATE:-15}
     volumes:
       - ./tmp/videos:/videos
@@ -72,7 +72,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ['1']
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -99,7 +99,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ['1']
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
@@ -109,6 +109,34 @@ services:
       start_period: 300s
     profiles:
       - ml
+
+  # VLM Service (use --profile vlm to start)
+  vlm:
+    build:
+      context: ./docker/vlm
+      dockerfile: Dockerfile
+    container_name: automation-vlm
+    ports:
+      - "${VLM_PORT:-8004}:8080"
+    volumes:
+      - ./tmp/vlm-models:/app/models
+    networks:
+      - automation-net
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['1']
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    profiles:
+      - vlm
 
 networks:
   automation-net:

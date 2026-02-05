@@ -4,6 +4,12 @@ FastAPI server for natural language click prediction using GUI-Actor (Qwen2.5-VL
 Model downloaded from HuggingFace on first startup.
 """
 
+import os
+
+# GPU is assigned via docker-compose.yml device_ids: ['1']
+# Docker maps that GPU to appear as GPU 0 inside the container
+# Do NOT set CUDA_VISIBLE_DEVICES here - it would look for a non-existent GPU
+
 import io
 import time
 import warnings

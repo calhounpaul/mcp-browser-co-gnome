@@ -47,6 +47,13 @@ class DockerConfig(BaseModel):
     cdp_port: int = 9222
 
 
+class MLServicesConfig(BaseModel):
+    """ML services lifecycle configuration."""
+
+    idle_timeout: int = 300  # seconds before auto-stop
+    always_on: list[str] = Field(default_factory=list)  # services to never auto-stop
+
+
 class Config(BaseModel):
     """Main configuration class."""
 
@@ -54,6 +61,7 @@ class Config(BaseModel):
     recording: RecordingConfig = Field(default_factory=RecordingConfig)
     tunnel: TunnelConfig = Field(default_factory=TunnelConfig)
     docker: DockerConfig = Field(default_factory=DockerConfig)
+    ml_services: MLServicesConfig = Field(default_factory=MLServicesConfig)
 
     @classmethod
     def from_env(cls) -> "Config":

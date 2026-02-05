@@ -44,7 +44,7 @@ class DockerOrchestrator:
 
         Args:
             compose_dir: Directory containing docker-compose.yml.
-                        Defaults to the package root (cognome/).
+                        Defaults to the package root.
             ports: Custom port configuration. Defaults to standard ports.
         """
         if compose_dir is None:

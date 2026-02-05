@@ -25,6 +25,7 @@ from PIL import Image
 from novnc_automation.browser import AutomationBrowser
 from novnc_automation.docker import DockerOrchestrator
 from novnc_automation.input_capture import JSInputCapture, X11InputCapture
+from novnc_automation.ml_services import MLServiceManager, ServiceName, get_ml_manager
 
 # Directories for ephemeral data (all under tmp/)
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -45,6 +46,7 @@ for dir_path in [SCREENSHOTS_DIR, X11_SCREENSHOTS_DIR, LOGS_DIR, VIDEOS_DIR, TRA
 # ML Service URLs (Docker containers)
 OMNIPARSER_URL = "http://localhost:8010"
 GUI_ACTOR_URL = "http://localhost:8001"
+VLM_URL = "http://localhost:8004"
 
 # Global instances
 _browser: AutomationBrowser | None = None
@@ -52,9 +54,18 @@ _session_id: str | None = None
 _docker: DockerOrchestrator | None = None
 _js_capture: JSInputCapture | None = None
 _x11_capture: X11InputCapture | None = None
+_ml_manager: MLServiceManager | None = None
 
 # Cached OmniParser results
 _omniparser_result: dict | None = None
+
+
+def _get_ml_manager() -> MLServiceManager:
+    """Get or create the ML service manager."""
+    global _ml_manager
+    if _ml_manager is None:
+        _ml_manager = get_ml_manager()
+    return _ml_manager
 
 
 def _flatten_url(url: str, max_length: int = 50) -> str:
@@ -133,13 +144,27 @@ async def _gui_actor_healthy() -> bool:
     return await _check_ml_service_health(GUI_ACTOR_URL)
 
 
+async def _vlm_healthy() -> bool:
+    """Check if VLM service is healthy and ready."""
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.get(f"{VLM_URL}/health")
+            if resp.status_code == 200:
+                data = resp.json()
+                # llama-server returns {"status": "ok"} when ready
+                return data.get("status") == "ok"
+    except Exception:
+        pass
+    return False
+
+
 # Create MCP server
 server = Server("novnc-automation")
 
 
 @server.list_tools()
 async def list_tools() -> list[Tool]:
-    """List available tools. ML tools only appear when their service is healthy."""
+    """List available tools. ML tools are always shown (services start on-demand)."""
     tools = [
         Tool(
             name="docker_start",
@@ -369,83 +394,111 @@ async def list_tools() -> list[Tool]:
         ),
     ]
 
-    # Check ML services health and add their tools if available
-    omniparser_ready, gui_actor_ready = await asyncio.gather(
-        _omniparser_healthy(),
-        _gui_actor_healthy(),
+    # ML tools are always available (services start on-demand)
+    # OmniParser tools
+    tools.extend([
+        Tool(
+            name="omniparser_analyze",
+            description="Analyze the current browser screenshot with OmniParser v2 to detect UI elements. Returns an annotated image with numbered bounding boxes and a JSON file with element descriptions. Use this to understand what's on screen before clicking.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "use_local": {
+                        "type": "boolean",
+                        "description": "Use local models instead of API (requires GPU). Default: false.",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="omniparser_click",
+            description="Click at the center of a UI element detected by omniparser_analyze. Must call omniparser_analyze first.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "element_id": {
+                        "type": "integer",
+                        "description": "The ID number of the element to click (from omniparser_analyze results).",
+                    },
+                },
+                "required": ["element_id"],
+            },
+        ),
+        Tool(
+            name="omniparser_get_html",
+            description="Get the HTML of the DOM element at the center of a bounding box detected by omniparser_analyze. Useful for inspecting element structure without interacting.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "element_id": {
+                        "type": "integer",
+                        "description": "The ID number of the element (from omniparser_analyze results).",
+                    },
+                    "outer_html": {
+                        "type": "boolean",
+                        "description": "Return outerHTML instead of innerHTML. Default: true.",
+                    },
+                },
+                "required": ["element_id"],
+            },
+        ),
+        Tool(
+            name="omniparser_list_elements",
+            description="List all elements from the most recent omniparser_analyze call with their IDs, types, text, and descriptions.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+    ])
+
+    # GUI-Actor tool
+    tools.append(
+        Tool(
+            name="natural_language_click",
+            description="Click on a UI element described in natural language using GUI-Actor AI model. Takes a screenshot and uses vision AI to find the element.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "instruction": {
+                        "type": "string",
+                        "description": "Natural language description of what to click (e.g., 'Click the search button', 'Click the login link').",
+                    },
+                },
+                "required": ["instruction"],
+            },
+        )
     )
 
-    if omniparser_ready:
-        tools.extend([
-            Tool(
-                name="omniparser_analyze",
-                description="Analyze the current browser screenshot with OmniParser v2 to detect UI elements. Returns an annotated image with numbered bounding boxes and a JSON file with element descriptions. Use this to understand what's on screen before clicking.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "use_local": {
-                            "type": "boolean",
-                            "description": "Use local models instead of API (requires GPU). Default: false.",
-                        },
+    # VLM tool
+    tools.append(
+        Tool(
+            name="vlm_chat",
+            description="Chat with local Qwen3-VL vision model. Use for image analysis like "
+                       "'describe this image' or 'which element should I click?'.\n\n"
+                       "Simple usage: provide `prompt` and `image_path` parameters.\n\n"
+                       "Advanced usage: provide `messages` array for multi-turn conversations. Example:\n"
+                       '[{"role": "user", "content": [{"type": "image_path", "image_path": "/path/to/img.png"}, '
+                       '{"type": "text", "text": "Describe this"}]}]',
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "Text prompt to send with the image (simple mode).",
                     },
-                },
-            ),
-            Tool(
-                name="omniparser_click",
-                description="Click at the center of a UI element detected by omniparser_analyze. Must call omniparser_analyze first.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "element_id": {
-                            "type": "integer",
-                            "description": "The ID number of the element to click (from omniparser_analyze results).",
-                        },
+                    "image_path": {
+                        "type": "string",
+                        "description": "Path to image file to analyze (simple mode).",
                     },
-                    "required": ["element_id"],
-                },
-            ),
-            Tool(
-                name="omniparser_get_html",
-                description="Get the HTML of the DOM element at the center of a bounding box detected by omniparser_analyze. Useful for inspecting element structure without interacting.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "element_id": {
-                            "type": "integer",
-                            "description": "The ID number of the element (from omniparser_analyze results).",
-                        },
-                        "outer_html": {
-                            "type": "boolean",
-                            "description": "Return outerHTML instead of innerHTML. Default: true.",
-                        },
+                    "messages": {
+                        "type": "array",
+                        "description": "Full conversation array for multi-turn chat (advanced mode). "
+                                      "Overrides prompt/image_path if provided.",
+                        "items": {"type": "object"},
                     },
-                    "required": ["element_id"],
+                    "max_tokens": {"type": "integer", "description": "Max response tokens (default: 512)"},
                 },
-            ),
-            Tool(
-                name="omniparser_list_elements",
-                description="List all elements from the most recent omniparser_analyze call with their IDs, types, text, and descriptions.",
-                inputSchema={"type": "object", "properties": {}},
-            ),
-        ])
-
-    if gui_actor_ready:
-        tools.append(
-            Tool(
-                name="natural_language_click",
-                description="Click on a UI element described in natural language using GUI-Actor AI model. Takes a screenshot and uses vision AI to find the element.",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "instruction": {
-                            "type": "string",
-                            "description": "Natural language description of what to click (e.g., 'Click the search button', 'Click the login link').",
-                        },
-                    },
-                    "required": ["instruction"],
-                },
-            )
+            },
         )
+    )
 
     return tools
 
@@ -506,9 +559,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             status = _docker.status()
 
             # Also check ML services
-            omniparser_ready, gui_actor_ready = await asyncio.gather(
+            omniparser_ready, gui_actor_ready, vlm_ready = await asyncio.gather(
                 _omniparser_healthy(),
                 _gui_actor_healthy(),
+                _vlm_healthy(),
             )
 
             lines = ["Docker Status:"]
@@ -518,6 +572,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             lines.append(f"  Video running: {status.video_running}")
             lines.append(f"  OmniParser ready: {omniparser_ready}")
             lines.append(f"  GUI-Actor ready: {gui_actor_ready}")
+            lines.append(f"  VLM ready: {vlm_ready}")
             if status.tunnel_url:
                 lines.append(f"  Tunnel URL: {status.tunnel_url}")
             lines.append(f"  noVNC URL: {status.novnc_url}")
@@ -734,6 +789,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             if _browser is None:
                 return [TextContent(type="text", text="Browser not running. Call browser_start first.")]
 
+            # Ensure GUI-Actor service is running
+            manager = _get_ml_manager()
+            if not await manager.ensure_service(ServiceName.GUI_ACTOR):
+                return [TextContent(type="text", text="Failed to start GUI-Actor service. Check logs: docker logs automation-gui-actor")]
+
             instruction = arguments["instruction"]
 
             # Take screenshot
@@ -857,6 +917,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         elif name == "omniparser_analyze":
             if _browser is None:
                 return [TextContent(type="text", text="Browser not running. Call browser_start first.")]
+
+            # Ensure OmniParser service is running
+            manager = _get_ml_manager()
+            if not await manager.ensure_service(ServiceName.OMNIPARSER):
+                return [TextContent(type="text", text="Failed to start OmniParser service. Check logs: docker logs automation-omniparser")]
 
             # Take screenshot
             screenshot_bytes = await _browser.page.screenshot()
@@ -1042,6 +1107,104 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
             return [TextContent(type="text", text="\n".join(lines))]
 
+        # VLM chat tool
+        elif name == "vlm_chat":
+            # Ensure VLM service is running
+            manager = _get_ml_manager()
+            if not await manager.ensure_service(ServiceName.VLM):
+                return [TextContent(type="text", text="Failed to start VLM service. Check logs: docker logs automation-vlm")]
+
+            max_tokens = arguments.get("max_tokens", 512)
+
+            # Support simple mode (prompt + image_path) or advanced mode (messages array)
+            if "messages" in arguments:
+                messages = arguments["messages"]
+            elif "prompt" in arguments:
+                # Simple mode: build messages from prompt and optional image_path
+                prompt = arguments["prompt"]
+                image_path = arguments.get("image_path")
+                if image_path:
+                    messages = [{
+                        "role": "user",
+                        "content": [
+                            {"type": "image_path", "image_path": image_path},
+                            {"type": "text", "text": prompt},
+                        ]
+                    }]
+                else:
+                    messages = [{"role": "user", "content": prompt}]
+            else:
+                return [TextContent(type="text", text="Error: provide either 'prompt' (simple mode) or 'messages' (advanced mode)")]
+
+            # Convert messages to OpenAI chat format, encoding image paths as base64
+            api_messages = []
+            for msg in messages:
+                role = msg.get("role", "user")
+                content = msg.get("content")
+
+                if isinstance(content, str):
+                    # Simple text message
+                    api_messages.append({"role": role, "content": content})
+                elif isinstance(content, list):
+                    # Multi-part message with images
+                    parts = []
+                    for item in content:
+                        item_type = item.get("type")
+                        if item_type == "text":
+                            parts.append({"type": "text", "text": item.get("text", "")})
+                        elif item_type == "image_path":
+                            image_path = item.get("image_path")
+                            if image_path and Path(image_path).exists():
+                                # Read and encode image as base64
+                                async with aiofiles.open(image_path, "rb") as f:
+                                    image_bytes = await f.read()
+                                b64_data = base64.b64encode(image_bytes).decode("utf-8")
+                                # Detect mime type from extension
+                                ext = Path(image_path).suffix.lower()
+                                mime_types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
+                                mime_type = mime_types.get(ext, "image/png")
+                                parts.append({
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:{mime_type};base64,{b64_data}"},
+                                })
+                            else:
+                                parts.append({"type": "text", "text": f"[Image not found: {image_path}]"})
+                    api_messages.append({"role": role, "content": parts})
+                else:
+                    api_messages.append({"role": role, "content": str(content)})
+
+            # Call VLM via OpenAI-compatible API
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(
+                    f"{VLM_URL}/v1/chat/completions",
+                    json={
+                        "model": "Qwen3-VL-4B",
+                        "messages": api_messages,
+                        "max_tokens": max_tokens,
+                        "temperature": 0.7,
+                        "cache_prompt": False,  # Don't cache KV state between calls
+                    },
+                )
+                resp.raise_for_status()
+                result = resp.json()
+
+            # Extract response
+            response_text = result["choices"][0]["message"]["content"]
+            usage = result.get("usage", {})
+
+            await _log_action("vlm_chat", {
+                "message_count": len(messages),
+                "max_tokens": max_tokens,
+                "response_length": len(response_text),
+                "prompt_tokens": usage.get("prompt_tokens"),
+                "completion_tokens": usage.get("completion_tokens"),
+            })
+
+            return [TextContent(
+                type="text",
+                text=f"{response_text}\n\n---\nTokens: {usage.get('prompt_tokens', '?')} prompt, {usage.get('completion_tokens', '?')} completion",
+            )]
+
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -1052,8 +1215,16 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
 async def run_server():
     """Run the MCP server."""
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
+    # Start the ML service manager's idle monitor
+    ml_manager = _get_ml_manager()
+    await ml_manager.start()
+
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(read_stream, write_stream, server.create_initialization_options())
+    finally:
+        # Clean up the ML service manager
+        await ml_manager.stop()
 
 
 def main():
