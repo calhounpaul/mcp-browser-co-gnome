@@ -1243,13 +1243,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                     api_messages.append({"role": role, "content": str(content)})
 
             # Call VLM via OpenAI-compatible API with retry logic
-            max_retries = 3
-            retry_delay = 2.0  # seconds, doubles each retry
+            # Use longer delays to allow VLM to clear memory between requests
+            max_retries = 5
+            retry_delays = [5, 10, 15, 20, 30]  # seconds between attempts
             last_error = None
 
             for attempt in range(max_retries):
                 try:
-                    async with httpx.AsyncClient(timeout=120.0) as client:
+                    async with httpx.AsyncClient(timeout=180.0) as client:
                         resp = await client.post(
                             f"{get_service_url(ServiceName.VLM)}/v1/chat/completions",
                             headers=_tunnel_headers(),
@@ -1265,10 +1266,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                             result = resp.json()
                             break  # Success, exit retry loop
                         elif resp.status_code >= 500:
-                            # Server error, worth retrying
+                            # Server error (memory issues), worth retrying with delay
                             last_error = f"VLM error {resp.status_code}: {resp.text[:500]}"
                             if attempt < max_retries - 1:
-                                await asyncio.sleep(retry_delay * (2 ** attempt))
+                                delay = retry_delays[attempt]
+                                # Log retry to stderr so user sees progress
+                                import sys
+                                print(f"VLM memory error, waiting {delay}s before retry {attempt + 2}/{max_retries}...", file=sys.stderr)
+                                await asyncio.sleep(delay)
                                 continue
                         else:
                             # Client error (4xx), don't retry
@@ -1276,7 +1281,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                 except (httpx.TimeoutException, httpx.ConnectError) as e:
                     last_error = f"VLM connection error: {e}"
                     if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay * (2 ** attempt))
+                        delay = retry_delays[attempt]
+                        import sys
+                        print(f"VLM connection error, waiting {delay}s before retry {attempt + 2}/{max_retries}...", file=sys.stderr)
+                        await asyncio.sleep(delay)
                         continue
             else:
                 # All retries exhausted
