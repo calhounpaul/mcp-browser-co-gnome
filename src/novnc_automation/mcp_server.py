@@ -32,6 +32,7 @@ from novnc_automation.ml_services import (
     TUNNEL_KEY,
     get_ml_manager,
     get_service_url,
+    is_remote,
 )
 
 # Directories for ephemeral data (all under tmp/)
@@ -482,6 +483,18 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
     try:
         if name == "docker_start":
+            # Check if we're in client mode (remote services configured)
+            client_mode = CDP_ENDPOINT or is_remote(ServiceName.VLM)
+
+            if client_mode:
+                # Client mode: can't start Docker, services are remote
+                return [TextContent(
+                    type="text",
+                    text="Running in client mode with remote services. Docker management is disabled.\n"
+                    f"Remote CDP: {CDP_ENDPOINT or 'not configured'}\n"
+                    "Use docker_status to check remote service health.",
+                )]
+
             if _docker is not None:
                 status = _docker.status()
                 if status.browser_running:
@@ -516,6 +529,15 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             return [TextContent(type="text", text="\n".join(lines))]
 
         elif name == "docker_stop":
+            # Check if we're in client mode
+            client_mode = CDP_ENDPOINT or is_remote(ServiceName.VLM)
+
+            if client_mode:
+                return [TextContent(
+                    type="text",
+                    text="Running in client mode with remote services. Docker management is disabled.",
+                )]
+
             if _docker is None:
                 _docker = DockerOrchestrator()
             await _docker.stop_async()
@@ -526,11 +548,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             return [TextContent(type="text", text="Docker containers stopped.")]
 
         elif name == "docker_status":
-            if _docker is None:
-                _docker = DockerOrchestrator()
-            status = _docker.status()
+            # Check if we're in client mode (remote services configured)
+            client_mode = CDP_ENDPOINT or is_remote(ServiceName.VLM)
 
-            # Also check ML services
+            # Check ML services health (works for both local and remote)
             manager = _get_ml_manager()
             omniparser_ready, gui_actor_ready, vlm_ready = await asyncio.gather(
                 manager.is_healthy(ServiceName.OMNIPARSER),
@@ -538,18 +559,47 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                 manager.is_healthy(ServiceName.VLM),
             )
 
-            lines = ["Docker Status:"]
-            lines.append(f"  Browser running: {status.browser_running}")
-            lines.append(f"  Browser healthy: {status.browser_healthy}")
-            lines.append(f"  Tunnel running: {status.tunnel_running}")
-            lines.append(f"  Video running: {status.video_running}")
-            lines.append(f"  OmniParser ready: {omniparser_ready}")
-            lines.append(f"  GUI-Actor ready: {gui_actor_ready}")
-            lines.append(f"  VLM ready: {vlm_ready}")
-            if status.tunnel_url:
-                lines.append(f"  Tunnel URL: {status.tunnel_url}")
-            lines.append(f"  noVNC URL: {status.novnc_url}")
-            lines.append(f"  VNC Password: {status.vnc_password}")
+            if client_mode:
+                # Client mode: check remote endpoints, not local Docker
+                browser_healthy = False
+                if CDP_ENDPOINT:
+                    try:
+                        async with httpx.AsyncClient(timeout=5.0) as client:
+                            resp = await client.get(
+                                f"{CDP_ENDPOINT}/json/version",
+                                headers=_tunnel_headers(),
+                            )
+                            browser_healthy = resp.status_code == 200
+                    except Exception:
+                        pass
+
+                lines = ["Service Status (Client Mode):"]
+                lines.append(f"  Remote CDP: {CDP_ENDPOINT or 'not configured'}")
+                lines.append(f"  Browser reachable: {browser_healthy}")
+                lines.append(f"  OmniParser ready: {omniparser_ready}")
+                lines.append(f"  GUI-Actor ready: {gui_actor_ready}")
+                lines.append(f"  VLM ready: {vlm_ready}")
+                if is_remote(ServiceName.VLM):
+                    lines.append(f"  VLM URL: {get_service_url(ServiceName.VLM)}")
+            else:
+                # Server mode: check local Docker
+                if _docker is None:
+                    _docker = DockerOrchestrator()
+                status = _docker.status()
+
+                lines = ["Docker Status:"]
+                lines.append(f"  Browser running: {status.browser_running}")
+                lines.append(f"  Browser healthy: {status.browser_healthy}")
+                lines.append(f"  Tunnel running: {status.tunnel_running}")
+                lines.append(f"  Video running: {status.video_running}")
+                lines.append(f"  OmniParser ready: {omniparser_ready}")
+                lines.append(f"  GUI-Actor ready: {gui_actor_ready}")
+                lines.append(f"  VLM ready: {vlm_ready}")
+                if status.tunnel_url:
+                    lines.append(f"  Tunnel URL: {status.tunnel_url}")
+                lines.append(f"  noVNC URL: {status.novnc_url}")
+                lines.append(f"  VNC Password: {status.vnc_password}")
+
             return [TextContent(type="text", text="\n".join(lines))]
 
         elif name == "browser_start":
