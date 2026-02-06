@@ -602,11 +602,35 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
             # Check if Docker browser is running and connect via CDP
             cdp_endpoint = CDP_ENDPOINT or None
+            cdp_ws_url = None
+            cdp_headers: dict[str, str] = {}
             docker_browser = False
 
             if cdp_endpoint:
                 # Using remote CDP endpoint from env var
                 docker_browser = True
+                cdp_headers = _tunnel_headers()
+
+                # For tunneled CDP, resolve WebSocket URL with auth and rewrite it
+                if TUNNEL_KEY and cdp_endpoint.startswith("http"):
+                    try:
+                        async with httpx.AsyncClient(timeout=10.0) as client:
+                            resp = await client.get(
+                                f"{cdp_endpoint}/json/version",
+                                headers=cdp_headers,
+                            )
+                            resp.raise_for_status()
+                            ws_url = resp.json().get("webSocketDebuggerUrl", "")
+                            if ws_url:
+                                # Rewrite ws://localhost:9222/path -> wss://tunnel/cdp/path
+                                from urllib.parse import urlparse
+                                p_cdp = urlparse(cdp_endpoint)
+                                p_ws = urlparse(ws_url)
+                                scheme = "wss" if p_cdp.scheme == "https" else "ws"
+                                cdp_ws_url = f"{scheme}://{p_cdp.netloc}{p_cdp.path}{p_ws.path}"
+                                cdp_endpoint = None  # Use ws_url path instead
+                    except Exception as e:
+                        return [TextContent(type="text", text=f"Failed to connect to remote CDP: {e}")]
             else:
                 if _docker is None:
                     _docker = DockerOrchestrator()
@@ -634,6 +658,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                 headless=headless,
                 stealth=stealth,
                 cdp_endpoint=cdp_endpoint,
+                cdp_ws_url=cdp_ws_url,
+                cdp_headers=cdp_headers,
             )
             await _browser.start(restore_session=restore_session)
 

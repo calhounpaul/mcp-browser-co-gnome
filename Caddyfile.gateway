@@ -52,7 +52,9 @@
 	# CDP - Chrome DevTools Protocol (WebSocket support)
 	handle /cdp/* {
 		uri strip_prefix /cdp
-		reverse_proxy localhost:9222
+		reverse_proxy localhost:9222 {
+			flush_interval -1
+		}
 	}
 
 	# noVNC at root (no prefix strip needed)

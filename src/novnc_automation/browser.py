@@ -58,6 +58,8 @@ class AutomationBrowser:
         headless: bool | None = None,
         stealth: bool | None = None,
         cdp_endpoint: str | None = None,
+        cdp_ws_url: str | None = None,
+        cdp_headers: dict[str, str] | None = None,
     ):
         """Initialize AutomationBrowser.
 
@@ -67,10 +69,14 @@ class AutomationBrowser:
             headless: Override headless setting
             stealth: Override stealth mode setting
             cdp_endpoint: CDP endpoint URL to connect to existing browser (e.g., "http://localhost:9222")
+            cdp_ws_url: Direct WebSocket URL for CDP (used for tunneled connections)
+            cdp_headers: Extra headers for CDP connections (e.g., tunnel auth)
         """
         self.session_id = session_id or str(uuid.uuid4())
         self.config = config or Config.load()
         self.cdp_endpoint = cdp_endpoint
+        self.cdp_ws_url = cdp_ws_url
+        self.cdp_headers = cdp_headers or {}
 
         # Allow overrides
         if headless is not None:
@@ -129,9 +135,17 @@ class AutomationBrowser:
         # Start Playwright
         self._playwright = await async_playwright().start()
 
-        if self.cdp_endpoint:
+        if self.cdp_ws_url:
+            # Direct WebSocket connection (for tunneled CDP with rewritten URL)
+            self._browser = await self._playwright.chromium.connect(
+                self.cdp_ws_url, headers=self.cdp_headers,
+            )
+            self._using_cdp = True
+        elif self.cdp_endpoint:
             # Connect to existing browser via CDP
-            self._browser = await self._playwright.chromium.connect_over_cdp(self.cdp_endpoint)
+            self._browser = await self._playwright.chromium.connect_over_cdp(
+                self.cdp_endpoint, headers=self.cdp_headers,
+            )
             self._using_cdp = True
 
             # Get existing contexts or create new one
