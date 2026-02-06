@@ -18,12 +18,13 @@ exec /app/llama-server \
     --mmproj "$MODEL_DIR/$MMPROJ_FILE" \
     --alias "Qwen3-VL-4B" \
     --n-gpu-layers 999 \
-    --ctx-size 16384 \
+    --ctx-size 8192 \
     --n-parallel 1 \
-    --batch-size 2048 \
-    --ubatch-size 512 \
+    --batch-size 1024 \
+    --ubatch-size 256 \
     --port 8080 \
     --flash-attn on \
     --jinja \
     --cache-type-k q8_0 --cache-type-v q8_0 \
+    --cache-reuse 0 \
     "$@"
