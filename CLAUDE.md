@@ -31,7 +31,12 @@ docker compose up -d                # Start browser + video containers
 docker compose --profile tunnel up -d  # Include Cloudflare tunnel
 docker compose down                 # Stop all services
 
-# Restart individual services (keeps tunnel alive, no new credentials)
+# Restart/rebuild individual services (keeps tunnel alive, no new credentials)
+# From parent repo (qwen3-coder-next):
+./local-cc.sh --restart vlm           # Restart without rebuilding
+./local-cc.sh --rebuild vlm           # Rebuild with --no-cache
+
+# Or manually:
 docker restart automation-browser   # Restart browser only
 docker restart automation-vlm       # Restart VLM only
 
@@ -151,7 +156,8 @@ The MCP server exposes browser control to Claude Desktop. ML tools only appear w
 **VLM Tools (require `--profile vlm`):**
 - `vlm_chat` - Chat with vision model for image analysis
   - Supports simple mode (`prompt` + `image_path`) or multi-turn (`messages` array)
-  - Auto-retries on transient 500 errors (3 retries with 2s/4s/8s exponential backoff)
+  - Auto-retries on 5xx errors: 5 retries with delays (5s, 10s, 15s, 20s, 30s)
+  - 180s request timeout for large image processing
 
 **ML Tools (require `--profile ml` containers running):**
 - `natural_language_click` - Click element by natural language description (GUI-Actor)
@@ -191,7 +197,8 @@ The MCP server checks `/health` endpoints to determine tool availability. Tools 
 - Runs via llama-server (GGUF Q4_K_M + mmproj-F16) with 8k context, single parallel slot
 - MCP server retry logic: 5 retries with delays (5s, 10s, 15s, 20s, 30s) on 5xx errors
 - Memory management: `--n-parallel 1` ensures all KV cache available for image processing
-- If "failed to find memory slot" errors occur, rebuild VLM with `docker compose --profile vlm build vlm --no-cache`
+- If "failed to find memory slot" errors occur, rebuild VLM: `./local-cc.sh --rebuild vlm`
+- VLM entrypoint auto-detects llama-server version compatibility (--n-parallel vs -np, --flash-attn on vs --flash-attn)
 
 ### User Input Capture
 
