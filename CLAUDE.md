@@ -31,6 +31,10 @@ docker compose up -d                # Start browser + video containers
 docker compose --profile tunnel up -d  # Include Cloudflare tunnel
 docker compose down                 # Stop all services
 
+# Restart individual services (keeps tunnel alive, no new credentials)
+docker restart automation-browser   # Restart browser only
+docker restart automation-vlm       # Restart VLM only
+
 # Docker - ML Services (GPU required)
 docker compose --profile ml up -d   # Start OmniParser + GUI-Actor
 docker compose --profile ml build   # Build ML containers
