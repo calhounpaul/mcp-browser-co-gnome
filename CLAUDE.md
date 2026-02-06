@@ -126,7 +126,7 @@ Config loaded from `config.yml` (if exists) + environment variables. Key env var
 - `GUI_ACTOR_URL` - Override GUI-Actor base URL for remote access (default: `http://localhost:8001`)
 - `VLM_URL` - Override VLM base URL for remote access (default: `http://localhost:8004`)
 - `CDP_ENDPOINT` - Override CDP endpoint for remote browser (default: auto-detect from Docker)
-- `TUNNEL_KEY` - Shared secret for gateway tunnel auth (auto-generated if empty; adds `X-Tunnel-Key` header to all httpx requests)
+- `TUNNEL_KEY` - Shared secret for gateway tunnel auth (auto-generated server-side when no remote services configured; clients must set explicitly via env; adds `X-Tunnel-Key` header to all httpx requests)
 
 See `.env.example` and `config.yml.example` for all options.
 

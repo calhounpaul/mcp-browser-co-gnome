@@ -19,15 +19,6 @@ from typing import Callable
 
 import httpx
 
-# Tunnel authentication key (set when connecting via gateway tunnel)
-# If not provided, generate a random key so the gateway is always protected
-TUNNEL_KEY = os.getenv("TUNNEL_KEY", "")
-if not TUNNEL_KEY:
-    TUNNEL_KEY = secrets.token_hex(16)
-    os.environ["TUNNEL_KEY"] = TUNNEL_KEY
-    print(f"[tunnel-auth] Generated tunnel key: {TUNNEL_KEY}", file=sys.stderr, flush=True)
-
-
 class ServiceName(Enum):
     """ML service identifiers."""
     OMNIPARSER = "omniparser"
@@ -86,6 +77,15 @@ for _svc, _env_var in _URL_ENV_VARS.items():
         _REMOTE_SERVICES.add(_svc)
     else:
         _SERVICE_URLS[_svc] = f"http://localhost:{SERVICE_CONFIG[_svc]['port']}"
+
+# Tunnel authentication key (set when connecting via gateway tunnel)
+# Only auto-generate when running server-side (no remote services configured).
+# When remote services exist, we're a client and the key must come from env.
+TUNNEL_KEY = os.getenv("TUNNEL_KEY", "")
+if not TUNNEL_KEY and not _REMOTE_SERVICES:
+    TUNNEL_KEY = secrets.token_hex(16)
+    os.environ["TUNNEL_KEY"] = TUNNEL_KEY
+    print(f"[tunnel-auth] Generated tunnel key: {TUNNEL_KEY}", file=sys.stderr, flush=True)
 
 
 def is_remote(service: ServiceName) -> bool:

@@ -16,7 +16,7 @@ exec /app/llama-server \
     --mmproj "$MODEL_DIR/$MMPROJ_FILE" \
     --alias "Qwen3-VL-4B" \
     --n-gpu-layers 999 \
-    --ctx-size 4096 \
+    --ctx-size 8192 \
     --port 8080 \
     --flash-attn on \
     "$@"

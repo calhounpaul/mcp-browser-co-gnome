@@ -26,7 +26,13 @@ from PIL import Image
 from novnc_automation.browser import AutomationBrowser
 from novnc_automation.docker import DockerOrchestrator
 from novnc_automation.input_capture import JSInputCapture, X11InputCapture
-from novnc_automation.ml_services import MLServiceManager, ServiceName, get_ml_manager
+from novnc_automation.ml_services import (
+    MLServiceManager,
+    ServiceName,
+    TUNNEL_KEY,
+    get_ml_manager,
+    get_service_url,
+)
 
 # Directories for ephemeral data (all under tmp/)
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -44,12 +50,7 @@ OMNIPARSER_DIR = TMP_DIR / "omniparser"
 for dir_path in [SCREENSHOTS_DIR, X11_SCREENSHOTS_DIR, LOGS_DIR, VIDEOS_DIR, TRACES_DIR, HAR_DIR, REPOS_DIR, OMNIPARSER_DIR]:
     dir_path.mkdir(parents=True, exist_ok=True)
 
-# ML Service URLs (configurable via env vars for remote access)
-OMNIPARSER_URL = os.getenv("OMNIPARSER_URL", "http://localhost:8010")
-GUI_ACTOR_URL = os.getenv("GUI_ACTOR_URL", "http://localhost:8001")
-VLM_URL = os.getenv("VLM_URL", "http://localhost:8004")
 CDP_ENDPOINT = os.getenv("CDP_ENDPOINT", "")
-TUNNEL_KEY = os.getenv("TUNNEL_KEY", "")
 
 
 def _tunnel_headers() -> dict[str, str]:
@@ -127,45 +128,6 @@ async def _log_user_input(event_data: dict) -> None:
     log_file = LOGS_DIR / f"actions_{datetime.now().strftime('%Y%m%d')}.jsonl"
     async with aiofiles.open(log_file, "a") as f:
         await f.write(json.dumps(log_entry) + "\n")
-
-
-async def _check_ml_service_health(url: str, timeout: float = 2.0) -> bool:
-    """Check if an ML service is healthy and responding."""
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(f"{url}/health", headers=_tunnel_headers())
-            if resp.status_code == 200:
-                data = resp.json()
-                # Service is available if it responds with healthy status
-                # Models may load lazily on first request
-                return data.get("status") == "healthy"
-    except Exception:
-        pass
-    return False
-
-
-async def _omniparser_healthy() -> bool:
-    """Check if OmniParser service is healthy and ready."""
-    return await _check_ml_service_health(OMNIPARSER_URL)
-
-
-async def _gui_actor_healthy() -> bool:
-    """Check if GUI-Actor service is healthy and ready."""
-    return await _check_ml_service_health(GUI_ACTOR_URL)
-
-
-async def _vlm_healthy() -> bool:
-    """Check if VLM service is healthy and ready."""
-    try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            resp = await client.get(f"{VLM_URL}/health", headers=_tunnel_headers())
-            if resp.status_code == 200:
-                data = resp.json()
-                # llama-server returns {"status": "ok"} when ready
-                return data.get("status") == "ok"
-    except Exception:
-        pass
-    return False
 
 
 # Create MCP server
@@ -569,10 +531,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             status = _docker.status()
 
             # Also check ML services
+            manager = _get_ml_manager()
             omniparser_ready, gui_actor_ready, vlm_ready = await asyncio.gather(
-                _omniparser_healthy(),
-                _gui_actor_healthy(),
-                _vlm_healthy(),
+                manager.is_healthy(ServiceName.OMNIPARSER),
+                manager.is_healthy(ServiceName.GUI_ACTOR),
+                manager.is_healthy(ServiceName.VLM),
             )
 
             lines = ["Docker Status:"]
@@ -859,7 +822,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 files = {"file": ("screenshot.png", screenshot_bytes, "image/png")}
                 data = {"instruction": instruction}
-                resp = await client.post(f"{GUI_ACTOR_URL}/predict", files=files, data=data, headers=_tunnel_headers())
+                resp = await client.post(f"{get_service_url(ServiceName.GUI_ACTOR)}/predict", files=files, data=data, headers=_tunnel_headers())
                 resp.raise_for_status()
                 result = resp.json()
 
@@ -985,7 +948,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             # Call OmniParser API
             async with httpx.AsyncClient(timeout=120.0) as client:
                 files = {"file": ("screenshot.png", screenshot_bytes, "image/png")}
-                resp = await client.post(f"{OMNIPARSER_URL}/analyze", files=files, headers=_tunnel_headers())
+                resp = await client.post(f"{get_service_url(ServiceName.OMNIPARSER)}/analyze", files=files, headers=_tunnel_headers())
                 resp.raise_for_status()
                 result = resp.json()
 
@@ -1232,7 +1195,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             # Call VLM via OpenAI-compatible API
             async with httpx.AsyncClient(timeout=120.0) as client:
                 resp = await client.post(
-                    f"{VLM_URL}/v1/chat/completions",
+                    f"{get_service_url(ServiceName.VLM)}/v1/chat/completions",
                     headers=_tunnel_headers(),
                     json={
                         "model": "Qwen3-VL-4B",
@@ -1242,7 +1205,9 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                         "cache_prompt": False,  # Don't cache KV state between calls
                     },
                 )
-                resp.raise_for_status()
+                if resp.status_code != 200:
+                    error_body = resp.text[:500]
+                    return [TextContent(type="text", text=f"VLM error {resp.status_code}: {error_body}")]
                 result = resp.json()
 
             # Extract response
