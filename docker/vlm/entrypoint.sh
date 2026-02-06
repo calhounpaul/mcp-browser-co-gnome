@@ -19,8 +19,9 @@ exec /app/llama-server \
     --alias "Qwen3-VL-4B" \
     --n-gpu-layers 999 \
     --ctx-size 16384 \
-    --batch-size 4096 \
-    --ubatch-size 2048 \
+    --n-parallel 1 \
+    --batch-size 2048 \
+    --ubatch-size 512 \
     --port 8080 \
     --flash-attn on \
     --jinja \
