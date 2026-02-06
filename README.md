@@ -240,6 +240,7 @@ npx playwright show-trace tmp/traces/my-session.zip
 | `STEALTH_MODE` | `true` | Enable anti-detection |
 | `HEADLESS` | `false` | Run headless (no display) |
 | `INSTALL_UBLOCK` | `true` | Install [uBlock Origin](https://ublockorigin.com/) ad blocker |
+| `TUNNEL_KEY` | (auto-generated) | Shared secret for gateway tunnel auth (adds `X-Tunnel-Key` header to httpx requests) |
 
 ### YAML Configuration
 

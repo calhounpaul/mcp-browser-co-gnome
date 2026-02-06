@@ -47,9 +47,12 @@ src/novnc_automation/
 ├── input_capture.py  # JSInputCapture + X11InputCapture - user input recording
 ├── tunnel.py         # TunnelManager - Cloudflare quick tunnels
 ├── docker.py         # DockerOrchestrator - programmatic Docker Compose control
-├── mcp_server.py     # MCP server exposing browser as tools for Claude
+├── mcp_server.py     # MCP server exposing browser as tools (includes tunnel auth headers)
+├── ml_services.py    # MLServiceManager - on-demand ML service lifecycle (includes tunnel auth)
 └── models/
     └── session_state.py  # Pydantic models for session/action data
+
+Caddyfile.gateway     # Caddy reverse proxy config for single gateway tunnel (path-based routing)
 
 docker/
 ├── browser/                # Browser container (Playwright + Xvfb + noVNC)
@@ -123,6 +126,7 @@ Config loaded from `config.yml` (if exists) + environment variables. Key env var
 - `GUI_ACTOR_URL` - Override GUI-Actor base URL for remote access (default: `http://localhost:8001`)
 - `VLM_URL` - Override VLM base URL for remote access (default: `http://localhost:8004`)
 - `CDP_ENDPOINT` - Override CDP endpoint for remote browser (default: auto-detect from Docker)
+- `TUNNEL_KEY` - Shared secret for gateway tunnel auth (auto-generated if empty; adds `X-Tunnel-Key` header to all httpx requests)
 
 See `.env.example` and `config.yml.example` for all options.
 
