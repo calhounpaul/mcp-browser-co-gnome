@@ -10,12 +10,18 @@
 		not header X-Tunnel-Key {$TUNNEL_SECRET}
 		not header Authorization "Bearer {$TUNNEL_SECRET}"
 		path /code-llm/* /vlm/* /omniparser/* /gui-actor/* /cdp/*
+		not path /chisel/*
 	}
 	respond @api_no_key "Unauthorized" 401
 
+	# Chisel encrypted tunnel endpoint (SSH handles its own auth)
+	handle_path /chisel/* {
+		reverse_proxy localhost:8889
+	}
+
 	# noVNC (root path) uses basic_auth for browser-friendly login
 	@novnc_root {
-		not path /code-llm/* /vlm/* /omniparser/* /gui-actor/* /cdp/*
+		not path /code-llm/* /vlm/* /omniparser/* /gui-actor/* /cdp/* /chisel/*
 	}
 	basic_auth @novnc_root {
 		tunnel {$TUNNEL_SECRET_HASH}
