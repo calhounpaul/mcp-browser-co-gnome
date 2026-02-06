@@ -14,14 +14,19 @@
 	}
 	respond @api_no_key "Unauthorized" 401
 
-	# Chisel encrypted tunnel endpoint (SSH handles its own auth)
-	handle_path /chisel/* {
-		reverse_proxy localhost:8889
+	# Chisel encrypted tunnel endpoint (WebSocket, SSH handles its own auth)
+	# Match both /chisel and /chisel/*
+	@chisel path /chisel /chisel/*
+	handle @chisel {
+		uri strip_prefix /chisel
+		reverse_proxy localhost:8889 {
+			flush_interval -1
+		}
 	}
 
 	# noVNC (root path) uses basic_auth for browser-friendly login
 	@novnc_root {
-		not path /code-llm/* /vlm/* /omniparser/* /gui-actor/* /cdp/* /chisel/*
+		not path /code-llm/* /vlm/* /omniparser/* /gui-actor/* /cdp/* /chisel /chisel/*
 	}
 	basic_auth @novnc_root {
 		tunnel {$TUNNEL_SECRET_HASH}
