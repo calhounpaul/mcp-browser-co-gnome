@@ -11,12 +11,17 @@ MMPROJ_FILE="${VLM_MMPROJ_FILE:-mmproj-F16.gguf}"
 /app/download_models.sh
 
 # Start llama-server with VLM configuration
+# Larger context (16384) needed for processing high-resolution images
+# Images can take 4000+ tokens depending on resolution
 exec /app/llama-server \
     --model "$MODEL_DIR/$MODEL_FILE" \
     --mmproj "$MODEL_DIR/$MMPROJ_FILE" \
     --alias "Qwen3-VL-4B" \
     --n-gpu-layers 999 \
-    --ctx-size 8192 \
+    --ctx-size 16384 \
+    --batch-size 4096 \
+    --ubatch-size 2048 \
     --port 8080 \
     --flash-attn on \
+    --cache-type-k q8_0 --cache-type-v q8_0 \
     "$@"
