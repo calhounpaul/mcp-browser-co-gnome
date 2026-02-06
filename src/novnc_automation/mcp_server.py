@@ -49,6 +49,14 @@ OMNIPARSER_URL = os.getenv("OMNIPARSER_URL", "http://localhost:8010")
 GUI_ACTOR_URL = os.getenv("GUI_ACTOR_URL", "http://localhost:8001")
 VLM_URL = os.getenv("VLM_URL", "http://localhost:8004")
 CDP_ENDPOINT = os.getenv("CDP_ENDPOINT", "")
+TUNNEL_KEY = os.getenv("TUNNEL_KEY", "")
+
+
+def _tunnel_headers() -> dict[str, str]:
+    """Build auth headers for tunnel gateway requests."""
+    if TUNNEL_KEY:
+        return {"X-Tunnel-Key": TUNNEL_KEY}
+    return {}
 
 # Global instances
 _browser: AutomationBrowser | None = None
@@ -125,7 +133,7 @@ async def _check_ml_service_health(url: str, timeout: float = 2.0) -> bool:
     """Check if an ML service is healthy and responding."""
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(f"{url}/health")
+            resp = await client.get(f"{url}/health", headers=_tunnel_headers())
             if resp.status_code == 200:
                 data = resp.json()
                 # Service is available if it responds with healthy status
@@ -150,7 +158,7 @@ async def _vlm_healthy() -> bool:
     """Check if VLM service is healthy and ready."""
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
-            resp = await client.get(f"{VLM_URL}/health")
+            resp = await client.get(f"{VLM_URL}/health", headers=_tunnel_headers())
             if resp.status_code == 200:
                 data = resp.json()
                 # llama-server returns {"status": "ok"} when ready
@@ -825,7 +833,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 files = {"file": ("screenshot.png", screenshot_bytes, "image/png")}
                 data = {"instruction": instruction}
-                resp = await client.post(f"{GUI_ACTOR_URL}/predict", files=files, data=data)
+                resp = await client.post(f"{GUI_ACTOR_URL}/predict", files=files, data=data, headers=_tunnel_headers())
                 resp.raise_for_status()
                 result = resp.json()
 
@@ -951,7 +959,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             # Call OmniParser API
             async with httpx.AsyncClient(timeout=120.0) as client:
                 files = {"file": ("screenshot.png", screenshot_bytes, "image/png")}
-                resp = await client.post(f"{OMNIPARSER_URL}/analyze", files=files)
+                resp = await client.post(f"{OMNIPARSER_URL}/analyze", files=files, headers=_tunnel_headers())
                 resp.raise_for_status()
                 result = resp.json()
 
@@ -1199,6 +1207,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 resp = await client.post(
                     f"{VLM_URL}/v1/chat/completions",
+                    headers=_tunnel_headers(),
                     json={
                         "model": "Qwen3-VL-4B",
                         "messages": api_messages,

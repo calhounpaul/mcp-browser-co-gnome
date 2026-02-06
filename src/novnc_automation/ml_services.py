@@ -9,13 +9,23 @@ Manages OmniParser, GUI-Actor, and VLM services with:
 
 import asyncio
 import os
+import secrets
 import subprocess
+import sys
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Callable
 
 import httpx
+
+# Tunnel authentication key (set when connecting via gateway tunnel)
+# If not provided, generate a random key so the gateway is always protected
+TUNNEL_KEY = os.getenv("TUNNEL_KEY", "")
+if not TUNNEL_KEY:
+    TUNNEL_KEY = secrets.token_hex(16)
+    os.environ["TUNNEL_KEY"] = TUNNEL_KEY
+    print(f"[tunnel-auth] Generated tunnel key: {TUNNEL_KEY}", file=sys.stderr, flush=True)
 
 
 class ServiceName(Enum):
@@ -224,10 +234,11 @@ class MLServiceManager:
         """Check if a service is healthy."""
         config = SERVICE_CONFIG[service]
         url = f"{_SERVICE_URLS[service]}{config['health_endpoint']}"
+        headers = {"X-Tunnel-Key": TUNNEL_KEY} if TUNNEL_KEY else {}
 
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
-                resp = await client.get(url)
+                resp = await client.get(url, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
                     return data.get(config["health_key"]) == config["health_value"]

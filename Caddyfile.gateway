@@ -1,0 +1,56 @@
+{
+	auto_https off
+	http_port 8888
+}
+
+:8888 {
+	# Require valid auth on all API paths:
+	# Accept either X-Tunnel-Key header or Authorization: Bearer token
+	@api_no_key {
+		not header X-Tunnel-Key {$TUNNEL_SECRET}
+		not header Authorization "Bearer {$TUNNEL_SECRET}"
+		path /code-llm/* /vlm/* /omniparser/* /gui-actor/* /cdp/*
+	}
+	respond @api_no_key "Unauthorized" 401
+
+	# noVNC (root path) uses basic_auth for browser-friendly login
+	@novnc_root {
+		not path /code-llm/* /vlm/* /omniparser/* /gui-actor/* /cdp/*
+	}
+	basic_auth @novnc_root {
+		tunnel {$TUNNEL_SECRET_HASH}
+	}
+
+	# Code LLM - OpenAI-compatible API (streaming support)
+	handle_path /code-llm/* {
+		reverse_proxy localhost:8003 {
+			flush_interval -1
+		}
+	}
+
+	# VLM - Vision Language Model
+	handle_path /vlm/* {
+		reverse_proxy localhost:8004
+	}
+
+	# OmniParser - UI element detection
+	handle_path /omniparser/* {
+		reverse_proxy localhost:8010
+	}
+
+	# GUI-Actor - Natural language clicking
+	handle_path /gui-actor/* {
+		reverse_proxy localhost:8001
+	}
+
+	# CDP - Chrome DevTools Protocol (WebSocket support)
+	handle /cdp/* {
+		uri strip_prefix /cdp
+		reverse_proxy localhost:9222
+	}
+
+	# noVNC at root (no prefix strip needed)
+	handle {
+		reverse_proxy localhost:6080
+	}
+}
