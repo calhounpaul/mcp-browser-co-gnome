@@ -23,5 +23,6 @@ exec /app/llama-server \
     --ubatch-size 2048 \
     --port 8080 \
     --flash-attn on \
+    --jinja \
     --cache-type-k q8_0 --cache-type-v q8_0 \
     "$@"
