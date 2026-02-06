@@ -1,3 +1,24 @@
+# =============================================================================
+# MCP Browser Automation Suite - Standalone Docker Compose
+# =============================================================================
+# This docker-compose provides browser automation as MCP tools for any
+# AI coding assistant (Claude Code, Qwen Code, Cursor, etc.)
+#
+# Usage:
+#   docker compose up -d                    # Core services (browser + video)
+#   docker compose --profile vlm up -d      # Include VLM for image analysis
+#   docker compose --profile ml up -d       # Include OmniParser + GUI-Actor
+#   docker compose --profile tunnel up -d   # Include Cloudflare tunnel
+#
+# Then add the MCP server to your coding assistant:
+#   pip install -e .
+#   claude mcp add browser-automation novnc-mcp
+#   # or: qwen mcp add --transport stdio browser-automation novnc-mcp
+#
+# For the full stack with Code LLM, use the parent repo's docker-compose:
+#   cd .. && docker compose up -d
+# =============================================================================
+
 services:
   browser:
     build:
