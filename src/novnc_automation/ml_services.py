@@ -4,6 +4,7 @@ Manages OmniParser, GUI-Actor, and VLM services with:
 - On-demand startup when tools are called
 - Automatic shutdown after idle timeout
 - Mutual exclusion (only one heavy ML service at a time on GPU 1)
+- Remote URL support (skip Docker management for remote services)
 """
 
 import asyncio
@@ -23,6 +24,13 @@ class ServiceName(Enum):
     GUI_ACTOR = "gui-actor"
     VLM = "vlm"
 
+
+# Environment variable names for remote URL overrides
+_URL_ENV_VARS = {
+    ServiceName.OMNIPARSER: "OMNIPARSER_URL",
+    ServiceName.GUI_ACTOR: "GUI_ACTOR_URL",
+    ServiceName.VLM: "VLM_URL",
+}
 
 # Service configurations
 SERVICE_CONFIG = {
@@ -54,6 +62,30 @@ SERVICE_CONFIG = {
         "compose_profile": "vlm",
     },
 }
+
+# Resolve service base URLs from env vars (remote) or localhost (local)
+# Also track which services are remote (managed externally, no Docker control)
+_SERVICE_URLS: dict[ServiceName, str] = {}
+_REMOTE_SERVICES: set[ServiceName] = set()
+
+for _svc, _env_var in _URL_ENV_VARS.items():
+    _env_val = os.getenv(_env_var, "")
+    if _env_val:
+        # Strip trailing slash for consistency
+        _SERVICE_URLS[_svc] = _env_val.rstrip("/")
+        _REMOTE_SERVICES.add(_svc)
+    else:
+        _SERVICE_URLS[_svc] = f"http://localhost:{SERVICE_CONFIG[_svc]['port']}"
+
+
+def is_remote(service: ServiceName) -> bool:
+    """Check if a service is configured with a remote URL."""
+    return service in _REMOTE_SERVICES
+
+
+def get_service_url(service: ServiceName) -> str:
+    """Get the base URL for a service."""
+    return _SERVICE_URLS[service]
 
 
 class MLServiceManager:
@@ -114,7 +146,8 @@ class MLServiceManager:
     async def ensure_service(self, service: ServiceName) -> bool:
         """Ensure a service is running and healthy.
 
-        If another heavy ML service is running, it will be stopped first.
+        If another heavy ML service is running locally, it will be stopped first.
+        Remote services are only health-checked (no Docker management).
 
         Args:
             service: The service to ensure is running
@@ -125,11 +158,18 @@ class MLServiceManager:
         async with self._lock:
             config = SERVICE_CONFIG[service]
 
-            # ALWAYS stop any other running ML services (they share GPU 1)
-            # Check ALL services, not just _active_service, in case services
-            # were started externally (e.g., via local-cc.sh --ml flag)
+            if is_remote(service):
+                # Remote service - just check health, no Docker management
+                if await self._check_health(service):
+                    self._last_used[service] = datetime.now()
+                    self._active_service = service
+                    return True
+                return False
+
+            # Local service - apply mutual exclusion with other LOCAL services
+            # (remote services don't consume local GPU, so skip them)
             for other_service in ServiceName:
-                if other_service != service:
+                if other_service != service and not is_remote(other_service):
                     if await self._check_health(other_service):
                         self._log_status(other_service, "stopping")
                         await self._stop_service(other_service)
@@ -175,13 +215,15 @@ class MLServiceManager:
                 "last_used": last_used.isoformat() if last_used else None,
                 "active": self._active_service == service,
                 "always_on": service.value in self.always_on,
+                "remote": is_remote(service),
+                "url": _SERVICE_URLS[service],
             }
         return status
 
     async def _check_health(self, service: ServiceName) -> bool:
         """Check if a service is healthy."""
         config = SERVICE_CONFIG[service]
-        url = f"http://localhost:{config['port']}{config['health_endpoint']}"
+        url = f"{_SERVICE_URLS[service]}{config['health_endpoint']}"
 
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
@@ -208,6 +250,9 @@ class MLServiceManager:
 
     async def _start_service(self, service: ServiceName) -> bool:
         """Start a service via docker compose."""
+        if is_remote(service):
+            return False  # Can't start remote services
+
         config = SERVICE_CONFIG[service]
         compose_service = config["compose_service"]
         compose_profile = config["compose_profile"]
@@ -228,6 +273,9 @@ class MLServiceManager:
 
     async def _stop_service(self, service: ServiceName) -> bool:
         """Stop a service via docker compose."""
+        if is_remote(service):
+            return False  # Can't stop remote services
+
         config = SERVICE_CONFIG[service]
         compose_service = config["compose_service"]
         compose_profile = config["compose_profile"]
@@ -259,8 +307,10 @@ class MLServiceManager:
                     timeout_delta = timedelta(seconds=self.idle_timeout)
 
                     for service, last_used in list(self._last_used.items()):
-                        # Skip always-on services
+                        # Skip always-on and remote services
                         if service.value in self.always_on:
+                            continue
+                        if is_remote(service):
                             continue
 
                         # Check if service is idle

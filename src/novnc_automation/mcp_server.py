@@ -7,6 +7,7 @@ accessed via HTTP APIs. Tools are only exposed when their service is healthy.
 import asyncio
 import base64
 import json
+import os
 import re
 import uuid
 from datetime import datetime
@@ -43,10 +44,11 @@ OMNIPARSER_DIR = TMP_DIR / "omniparser"
 for dir_path in [SCREENSHOTS_DIR, X11_SCREENSHOTS_DIR, LOGS_DIR, VIDEOS_DIR, TRACES_DIR, HAR_DIR, REPOS_DIR, OMNIPARSER_DIR]:
     dir_path.mkdir(parents=True, exist_ok=True)
 
-# ML Service URLs (Docker containers)
-OMNIPARSER_URL = "http://localhost:8010"
-GUI_ACTOR_URL = "http://localhost:8001"
-VLM_URL = "http://localhost:8004"
+# ML Service URLs (configurable via env vars for remote access)
+OMNIPARSER_URL = os.getenv("OMNIPARSER_URL", "http://localhost:8010")
+GUI_ACTOR_URL = os.getenv("GUI_ACTOR_URL", "http://localhost:8001")
+VLM_URL = os.getenv("VLM_URL", "http://localhost:8004")
+CDP_ENDPOINT = os.getenv("CDP_ENDPOINT", "")
 
 # Global instances
 _browser: AutomationBrowser | None = None
@@ -591,25 +593,32 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             stealth = arguments.get("stealth", True)
 
             # Check if Docker browser is running and connect via CDP
-            cdp_endpoint = None
-            if _docker is None:
-                _docker = DockerOrchestrator()
+            cdp_endpoint = CDP_ENDPOINT or None
+            docker_browser = False
 
-            # Wait for Docker browser to be healthy if container is starting
-            docker_status = _docker.status()
-            if docker_status.browser_running and not docker_status.browser_healthy:
-                # Container exists but not healthy yet - wait up to 30s
-                for _ in range(15):
-                    await asyncio.sleep(2)
-                    docker_status = _docker.status()
-                    if docker_status.browser_healthy:
-                        break
+            if cdp_endpoint:
+                # Using remote CDP endpoint from env var
+                docker_browser = True
+            else:
+                if _docker is None:
+                    _docker = DockerOrchestrator()
 
-            if docker_status.browser_healthy:
-                cdp_endpoint = "http://localhost:9222"
-            elif docker_status.browser_running:
-                # Container exists but failed to become healthy
-                return [TextContent(type="text", text="Docker browser container exists but is not healthy. Check 'docker logs automation-browser' for errors.")]
+                # Wait for Docker browser to be healthy if container is starting
+                docker_status = _docker.status()
+                if docker_status.browser_running and not docker_status.browser_healthy:
+                    # Container exists but not healthy yet - wait up to 30s
+                    for _ in range(15):
+                        await asyncio.sleep(2)
+                        docker_status = _docker.status()
+                        if docker_status.browser_healthy:
+                            break
+
+                if docker_status.browser_healthy:
+                    cdp_endpoint = "http://localhost:9222"
+                    docker_browser = True
+                elif docker_status.browser_running:
+                    # Container exists but failed to become healthy
+                    return [TextContent(type="text", text="Docker browser container exists but is not healthy. Check 'docker logs automation-browser' for errors.")]
 
             _session_id = session_id
             _browser = AutomationBrowser(
@@ -629,7 +638,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             except Exception as e:
                 print(f"JS input capture setup failed: {e}")
 
-            x11_capture_started = docker_status.browser_healthy
+            x11_capture_started = docker_browser
 
             await _log_action("browser_start", {
                 "session_id": session_id,

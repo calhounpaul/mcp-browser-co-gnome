@@ -119,6 +119,10 @@ Config loaded from `config.yml` (if exists) + environment variables. Key env var
 - `INSTALL_UBLOCK` - Install uBlock Origin ad blocker (default: `true`)
 - `OMNIPARSER_PORT` - OmniParser API port (default: 8010)
 - `GUI_ACTOR_PORT` - GUI-Actor API port (default: 8001)
+- `OMNIPARSER_URL` - Override OmniParser base URL for remote access (default: `http://localhost:8010`)
+- `GUI_ACTOR_URL` - Override GUI-Actor base URL for remote access (default: `http://localhost:8001`)
+- `VLM_URL` - Override VLM base URL for remote access (default: `http://localhost:8004`)
+- `CDP_ENDPOINT` - Override CDP endpoint for remote browser (default: auto-detect from Docker)
 
 See `.env.example` and `config.yml.example` for all options.
 
