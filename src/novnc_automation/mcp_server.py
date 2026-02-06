@@ -1192,23 +1192,45 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                 else:
                     api_messages.append({"role": role, "content": str(content)})
 
-            # Call VLM via OpenAI-compatible API
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(
-                    f"{get_service_url(ServiceName.VLM)}/v1/chat/completions",
-                    headers=_tunnel_headers(),
-                    json={
-                        "model": "Qwen3-VL-4B",
-                        "messages": api_messages,
-                        "max_tokens": max_tokens,
-                        "temperature": 0.7,
-                        "cache_prompt": False,  # Don't cache KV state between calls
-                    },
-                )
-                if resp.status_code != 200:
-                    error_body = resp.text[:500]
-                    return [TextContent(type="text", text=f"VLM error {resp.status_code}: {error_body}")]
-                result = resp.json()
+            # Call VLM via OpenAI-compatible API with retry logic
+            max_retries = 3
+            retry_delay = 2.0  # seconds, doubles each retry
+            last_error = None
+
+            for attempt in range(max_retries):
+                try:
+                    async with httpx.AsyncClient(timeout=120.0) as client:
+                        resp = await client.post(
+                            f"{get_service_url(ServiceName.VLM)}/v1/chat/completions",
+                            headers=_tunnel_headers(),
+                            json={
+                                "model": "Qwen3-VL-4B",
+                                "messages": api_messages,
+                                "max_tokens": max_tokens,
+                                "temperature": 0.7,
+                                "cache_prompt": False,  # Don't cache KV state between calls
+                            },
+                        )
+                        if resp.status_code == 200:
+                            result = resp.json()
+                            break  # Success, exit retry loop
+                        elif resp.status_code >= 500:
+                            # Server error, worth retrying
+                            last_error = f"VLM error {resp.status_code}: {resp.text[:500]}"
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(retry_delay * (2 ** attempt))
+                                continue
+                        else:
+                            # Client error (4xx), don't retry
+                            return [TextContent(type="text", text=f"VLM error {resp.status_code}: {resp.text[:500]}")]
+                except (httpx.TimeoutException, httpx.ConnectError) as e:
+                    last_error = f"VLM connection error: {e}"
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay * (2 ** attempt))
+                        continue
+            else:
+                # All retries exhausted
+                return [TextContent(type="text", text=f"VLM failed after {max_retries} retries. Last error: {last_error}")]
 
             # Extract response
             response_text = result["choices"][0]["message"]["content"]
