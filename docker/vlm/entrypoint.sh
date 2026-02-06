@@ -31,16 +31,16 @@ elif echo "$HELP_TEXT" | grep -q '\-\-flash-attn'; then
 fi
 
 # Start llama-server with VLM configuration
-# Context of 8192 is enough for most images (4000+ tokens)
+# Context of 32768 supports high-res images (4000+ tokens) + 2048 output tokens
 exec /app/llama-server \
     --model "$MODEL_DIR/$MODEL_FILE" \
     --mmproj "$MODEL_DIR/$MMPROJ_FILE" \
     --alias "Qwen3-VL-4B" \
     --n-gpu-layers 999 \
-    --ctx-size 8192 \
+    --ctx-size 32768 \
     $PARALLEL_ARG \
-    --batch-size 1024 \
-    --ubatch-size 256 \
+    --batch-size 2048 \
+    --ubatch-size 512 \
     --port 8080 \
     $FLASH_ARG \
     --jinja \

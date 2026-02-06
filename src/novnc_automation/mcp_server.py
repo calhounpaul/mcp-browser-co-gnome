@@ -467,7 +467,7 @@ async def list_tools() -> list[Tool]:
                                       "Overrides prompt/image_path if provided.",
                         "items": {"type": "object"},
                     },
-                    "max_tokens": {"type": "integer", "description": "Max response tokens (default: 512)"},
+                    "max_tokens": {"type": "integer", "description": "Max response tokens (default: 2048, max: ~28k with 32k context)"},
                 },
             },
         )
@@ -1183,7 +1183,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             if not await manager.ensure_service(ServiceName.VLM):
                 return [TextContent(type="text", text="Failed to start VLM service. Check logs: docker logs automation-vlm")]
 
-            max_tokens = arguments.get("max_tokens", 512)
+            max_tokens = arguments.get("max_tokens", 2048)
 
             # Support simple mode (prompt + image_path) or advanced mode (messages array)
             if "messages" in arguments:
