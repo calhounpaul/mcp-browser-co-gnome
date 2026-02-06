@@ -144,6 +144,11 @@ The MCP server exposes browser control to Claude Desktop. ML tools only appear w
 - `browser_stop`, `browser_goto`, `browser_click`, `browser_fill`
 - `browser_screenshot`, `browser_get_text`, `browser_evaluate`
 
+**VLM Tools (require `--profile vlm`):**
+- `vlm_chat` - Chat with vision model for image analysis
+  - Supports simple mode (`prompt` + `image_path`) or multi-turn (`messages` array)
+  - Auto-retries on transient 500 errors (3 retries with 2s/4s/8s exponential backoff)
+
 **ML Tools (require `--profile ml` containers running):**
 - `natural_language_click` - Click element by natural language description (GUI-Actor)
 - `omniparser_analyze` - Detect UI elements, save annotated image + JSON
@@ -175,6 +180,12 @@ ML models run in separate Docker containers with FastAPI servers:
 - Requires `transformers<5.0.0` (v5.0 moved `hidden_size` to `text_config`, breaking model loading)
 
 The MCP server checks `/health` endpoints to determine tool availability. Tools appear when service reports `status: "healthy"`.
+
+**VLM (localhost:8004):**
+- `/health` - Health check with status
+- `/v1/chat/completions` - OpenAI-compatible chat API with vision support
+- Runs Qwen3-VL-4B via llama-server with multimodal projection
+- MCP server implements retry logic: 3 retries with exponential backoff (2s, 4s, 8s) on 5xx errors
 
 ### User Input Capture
 
