@@ -181,10 +181,10 @@ ML models run in separate Docker containers with FastAPI servers:
 
 The MCP server checks `/health` endpoints to determine tool availability. Tools appear when service reports `status: "healthy"`.
 
-**VLM (localhost:8004):**
+**VLM (localhost:8004):** Qwen3-VL-4B vision-language model
 - `/health` - Health check with status
 - `/v1/chat/completions` - OpenAI-compatible chat API with vision support
-- Runs Qwen3-VL-4B via llama-server with multimodal projection
+- Runs via llama-server (GGUF Q8_0 + mmproj-F16) with 16k context
 - MCP server implements retry logic: 3 retries with exponential backoff (2s, 4s, 8s) on 5xx errors
 
 ### User Input Capture
