@@ -188,8 +188,10 @@ The MCP server checks `/health` endpoints to determine tool availability. Tools 
 **VLM (localhost:8004):** Qwen3-VL-4B vision-language model
 - `/health` - Health check with status
 - `/v1/chat/completions` - OpenAI-compatible chat API with vision support
-- Runs via llama-server (GGUF Q8_0 + mmproj-F16) with 16k context
-- MCP server implements retry logic: 3 retries with exponential backoff (2s, 4s, 8s) on 5xx errors
+- Runs via llama-server (GGUF Q4_K_M + mmproj-F16) with 8k context, single parallel slot
+- MCP server retry logic: 5 retries with delays (5s, 10s, 15s, 20s, 30s) on 5xx errors
+- Memory management: `--n-parallel 1` ensures all KV cache available for image processing
+- If "failed to find memory slot" errors occur, rebuild VLM with `docker compose --profile vlm build vlm --no-cache`
 
 ### User Input Capture
 
